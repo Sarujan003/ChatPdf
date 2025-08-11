@@ -1,0 +1,169 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat with PDF ⚡️</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css">
+    <style>
+        :root {
+            --bg-color: #1a1a1a; --primary-color: #2a2a2a; --secondary-color: #3a3a3a;
+            --text-color: #e0e0e0; --accent-color: #00aaff; --border-color: #444;
+        }
+        body {
+            font-family: 'Inter', sans-serif; margin: 0; background-color: var(--bg-color);
+            color: var(--text-color); display: flex; height: 100vh;
+        }
+        #app-container { display: flex; flex-direction: column; width: 100%; height: 100%; }
+        #chat-container { flex-grow: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; }
+        .message { max-width: 80%; margin-bottom: 20px; display: flex; align-items: flex-start; }
+        .message.user { align-self: flex-end; flex-direction: row-reverse; }
+        .message.bot { align-self: flex-start; }
+        .avatar {
+            width: 40px; height: 40px; border-radius: 50%; background-color: var(--secondary-color);
+            display: flex; align-items: center; justify-content: center; font-weight: bold;
+            flex-shrink: 0;
+        }
+        .user .avatar { margin-left: 10px; background-color: var(--accent-color); }
+        .bot .avatar { margin-right: 10px; background-image: url('https://raw.githubusercontent.com/langchain-ai/langchain/master/libs/langchain/langchain/static/langchain_icon_blue.svg'); background-size: 60%; background-position: center; background-repeat: no-repeat;}
+        .message-content {
+            padding: 12px 18px; border-radius: 18px; background-color: var(--primary-color);
+            word-wrap: break-word; overflow-wrap: break-word;
+        }
+        /* Markdown Styles */
+        .message-content p { margin: 0 0 10px; }
+        .message-content ul, .message-content ol { padding-left: 20px; margin: 10px 0; }
+        .message-content code { font-family: 'Courier New', Courier, monospace; background-color: var(--secondary-color); padding: 2px 4px; border-radius: 4px; font-size: 0.9em; }
+        .message-content pre { background-color: #282c34; border-radius: 8px; padding: 16px; margin: 10px 0; overflow-x: auto; }
+        .message-content pre code { background-color: transparent; padding: 0; }
+
+        #bottom-panel { padding: 20px; border-top: 1px solid var(--border-color); }
+        #upload-section { text-align: center; padding-bottom: 20px; }
+        #status { font-size: 0.9em; color: #aaa; margin-top: 10px; }
+        #chat-form { display: flex; }
+        #chat-input {
+            flex-grow: 1; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px;
+            background-color: var(--primary-color); color: var(--text-color); font-size: 1em;
+        }
+        #chat-input:focus { outline: none; border-color: var(--accent-color); }
+        #chat-form button {
+            margin-left: 10px; padding: 0 20px; border: none; background-color: var(--accent-color);
+            color: white; border-radius: 8px; cursor: pointer; font-size: 1.2em;
+        }
+        #chat-form button:disabled { background-color: var(--secondary-color); cursor: not-allowed; }
+    </style>
+</head>
+<body>
+    <div id="app-container">
+        <div id="chat-container">
+            <!-- Messages will be injected here -->
+        </div>
+        <div id="bottom-panel">
+            <div id="upload-section">
+                <form id="upload-form" enctype="multipart/form-data">
+                    <input type="file" name="pdf_file" id="pdf-input" accept=".pdf" required>
+                    <button type="submit">Process PDF</button>
+                </form>
+                <div id="status">Upload a PDF to start chatting.</div>
+            </div>
+            <form id="chat-form">
+                <input type="text" id="chat-input" placeholder="Ask anything about your document..." autocomplete="off" disabled>
+                <button type="submit" id="send-button" disabled>➤</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const uploadForm = document.getElementById('upload-form');
+        const chatForm = document.getElementById('chat-form');
+        const chatInput = document.getElementById('chat-input');
+        const sendButton = document.getElementById('send-button');
+        const chatContainer = document.getElementById('chat-container');
+        const statusDiv = document.getElementById('status');
+        const pdfInput = document.getElementById('pdf-input');
+
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!pdfInput.files[0]) {
+                statusDiv.textContent = 'Please select a file first.';
+                return;
+            }
+            statusDiv.textContent = '⏳ Processing PDF... This might take a moment.';
+            sendButton.disabled = true;
+            chatInput.disabled = true;
+
+            const formData = new FormData(uploadForm);
+            const response = await fetch('/upload', { method: 'POST', body: formData });
+            const result = await response.json();
+
+            if (response.ok) {
+                statusDiv.textContent = `✅ ${result.message}`;
+                chatInput.disabled = false;
+                sendButton.disabled = false;
+            } else {
+                statusDiv.textContent = `🔥 Error: ${result.error}`;
+            }
+        });
+
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const question = chatInput.value.trim();
+            if (!question) return;
+
+            appendMessage(question, 'user');
+            chatInput.value = '';
+            chatInput.disabled = true;
+            sendButton.disabled = true;
+
+            const botMessageContainer = appendMessage('', 'bot');
+            const botContentDiv = botMessageContainer.querySelector('.message-content');
+            let fullResponse = '';
+
+            try {
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: question })
+                });
+
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    
+                    fullResponse += decoder.decode(value, { stream: true });
+                    botContentDiv.innerHTML = marked.parse(fullResponse);
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                }
+                // Final processing after stream ends
+                hljs.highlightAll();
+
+            } catch (error) {
+                botContentDiv.textContent = 'Sorry, an error occurred. ' + error.message;
+            } finally {
+                chatInput.disabled = false;
+                sendButton.disabled = false;
+                chatInput.focus();
+            }
+        });
+
+        function appendMessage(text, type) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            const avatar = `<div class="avatar">${type === 'user' ? 'You' : ''}</div>`;
+            const content = `<div class="message-content">${marked.parse(text)}</div>`;
+            messageDiv.innerHTML = type === 'user' ? content + avatar : avatar + content;
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+            return messageDiv;
+        }
+    </script>
+</body>
+</html>
