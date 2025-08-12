@@ -1,3 +1,5 @@
+<!-- templates/index.html -->
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -68,24 +70,10 @@
         }
         #chat-form button:disabled { background-color: var(--secondary-color); cursor: not-allowed; }
         
-        /* CORRECTED RESPONSIVE CSS FOR MOBILE */
         @media (max-width: 800px) {
-            #main-content {
-                flex-direction: column; /* Stack panes vertically */
-            }
-            #left-pane {
-                /* For a column layout, 'flex' controls height distribution. */
-                /* Take up 40% of the available height, but don't grow. */
-                flex: 0 1 40%;
-                border-right: none;
-                border-bottom: 1px solid var(--border-color);
-                min-height: 150px; /* Ensure pane is not too small */
-            }
-            #right-pane {
-                /* Take up the remaining 60% of the height and allow growing/shrinking. */
-                flex: 1 1 60%;
-                min-height: 250px; /* Ensure chat has enough space */
-            }
+            #main-content { flex-direction: column; }
+            #left-pane { flex: 0 1 40%; border-right: none; border-bottom: 1px solid var(--border-color); min-height: 150px; }
+            #right-pane { flex: 1 1 60%; min-height: 250px; }
         }
     </style>
 </head>
