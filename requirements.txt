@@ -3,6 +3,5 @@ langchain-community
 langchain-groq
 langchain-google-genai
 google-generativeai
-faiss-cpu
 pypdf
 Flask
