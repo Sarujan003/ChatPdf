@@ -1,32 +1,29 @@
 # app.py
 
 import os
+import math
 from flask import Flask, request, jsonify, Response, render_template, stream_with_context
 
 # LangChain components
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_community.vectorstores import FAISS
 from langchain.prompts import PromptTemplate
-from langchain.schema.runnable import RunnablePassthrough
+from langchain.schema.runnable import RunnableLambda, RunnablePassthrough
 from langchain.schema.output_parser import StrOutputParser
 from langchain_groq import ChatGroq
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-# --- 1. API Key and Model Initialization (Server-side) ---
-# API keys are read from environment variables set on the server
+# --- 1. API Key and Model Initialization ---
 os.environ["GROQ_API_KEY"] = os.environ.get("GROQ_API_KEY")
 os.environ["GOOGLE_API_KEY"] = os.environ.get("GOOGLE_API_KEY")
 
-# Initialize models
 try:
     llm = ChatGroq(temperature=0, model_name="deepseek-r1-distill-llama-70b")
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
     print("✅ Models initialized successfully.")
 except Exception as e:
     print(f"🔥 Error initializing models: {e}")
-    llm = None
-    embeddings = None
+    llm, embeddings = None, None
 
 # --- 2. Prompt Engineering ---
 ANALYSIS_PROMPT_TEMPLATE = """
@@ -59,10 +56,7 @@ Question:
 Answer:
 """
 
-# --- 3. Core AI Logic ---
-# Note: In a production app with multiple users, you'd manage this state
-# (like the RAG chain) per session, not with a global variable.
-# For this hackathon, a global variable is acceptable.
+# --- 3. Lightweight AI Logic ---
 rag_chain = None
 
 def perform_initial_analysis(docs):
@@ -73,16 +67,32 @@ def perform_initial_analysis(docs):
     analysis_chain = analysis_prompt | llm | StrOutputParser()
     return analysis_chain.invoke({"document_text": full_document_text})
 
+def cosine_similarity(vec1, vec2):
+    dot_product = sum(a * b for a, b in zip(vec1, vec2))
+    norm_a = math.sqrt(sum(a * a for a in vec1))
+    norm_b = math.sqrt(sum(b * b for b in vec2))
+    return 0.0 if norm_a == 0 or norm_b == 0 else dot_product / (norm_a * norm_b)
+
 def create_rag_chain(docs):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
     split_docs = text_splitter.split_documents(docs)
-    vector_store = FAISS.from_documents(documents=split_docs, embedding=embeddings)
-    retriever = vector_store.as_retriever(search_kwargs={'k': 5})
+    chunk_texts = [doc.page_content for doc in split_docs]
+    chunk_embeddings = embeddings.embed_documents(chunk_texts)
+
+    def retrieve_chunks(query_text: str, k: int = 5):
+        query_embedding = embeddings.embed_query(query_text)
+        similarities = [cosine_similarity(query_embedding, emb) for emb in chunk_embeddings]
+        indexed_chunks = sorted(list(zip(similarities, split_docs)), key=lambda x: x[0], reverse=True)
+        return [doc for sim, doc in indexed_chunks[:k]]
+
     prompt = PromptTemplate(template=RAG_PROMPT_TEMPLATE, input_variables=["context", "question"])
-    return (
-        {"context": retriever, "question": RunnablePassthrough()}
-        | prompt | llm | StrOutputParser()
-    )
+    retriever_runnable = RunnableLambda(lambda question: retrieve_chunks(question))
+    
+    return {
+        "context": retriever_runnable,
+        "question": RunnablePassthrough()
+    } | prompt | llm | StrOutputParser()
+
 
 # --- 4. Flask App Definition ---
 app = Flask(__name__)
@@ -96,7 +106,8 @@ def upload_pdf():
     global rag_chain
     if 'pdf_file' not in request.files: return jsonify({'error': 'No file part'}), 400
     file = request.files['pdf_file']
-    if file.filename == '' or not file.filename.lower().endswith('.pdf'): return jsonify({'error': 'Please select a valid PDF file'}), 400
+    if not file.filename or not file.filename.lower().endswith('.pdf'):
+        return jsonify({'error': 'Please select a valid PDF file'}), 400
     try:
         temp_dir = "/tmp"
         if not os.path.exists(temp_dir): os.makedirs(temp_dir)
